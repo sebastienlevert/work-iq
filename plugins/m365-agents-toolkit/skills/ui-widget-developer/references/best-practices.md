@@ -214,22 +214,9 @@ See the **Security** section in [widget-patterns.md](widget-patterns.md) for the
 
 ## 11. DevTunnels
 
-Use **random tunnels** for simplicity - no need to manage named tunnels.
+Use **named tunnels** for stable URLs that persist across restarts. See [devtunnels.md](devtunnels.md) for complete setup scripts and command reference.
 
-```bash
-devtunnel host -p 3001 --allow-anonymous
-```
-
-The setup script extracts the URL and updates `.env.local` automatically:
-```
-MCP_SERVER_URL=https://xxxxx-3001.usw2.devtunnels.ms
-MCP_SERVER_DOMAIN=xxxxx-3001.usw2.devtunnels.ms
-```
-
-**Important**: Since the URL changes each time, redeploy the agent after starting the tunnel:
-```bash
-npx -p @microsoft/m365agentstoolkit-cli@latest atk provision --env local
-```
+Key behavior: the URL stays the same across restarts, so `atk provision` is only needed once (and again only when the agent manifest changes — mcpPlugin.json, declarativeAgent.json, etc.).
 
 ## 12. Declarative Agent Capabilities
 
@@ -278,11 +265,16 @@ Always include both text content and structuredContent.
 return {
   content: [{ type: "text", text: "Human-readable summary" }],
   structuredContent: { /* data for widget */ },
-  _meta: { "openai/outputTemplate": "ui://widget/name.html" }
+  _meta: {
+    "openai/outputTemplate": "ui://widget/name.html",
+    "openai/widgetAccessible": true,
+    "openai/toolInvocation/invoking": "Processing...",
+    "openai/toolInvocation/invoked": "Complete",
+  }
 };
 ```
 
-The text content serves as fallback and accessibility.
+The text content serves as fallback and accessibility. The `_meta` fields are **required** — without `openai/widgetAccessible: true`, Copilot will not render the widget and the tool response will appear as null.
 
 ## 15. Conversation Starters
 

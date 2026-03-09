@@ -4,7 +4,7 @@
 - [Prerequisites](#prerequisites)
 - [Environment Configuration](#environment-configuration)
   - [`.env.local` File Structure](#envlocal-file-structure)
-- [Automated Setup Script (Random Tunnel)](#automated-setup-script-random-tunnel)
+- [Automated Setup Script (Named Tunnel)](#automated-setup-script-named-tunnel)
   - [`scripts/setup-devtunnel.sh`](#scriptssetup-devtunnelsh)
   - [`scripts/setup-devtunnel.ps1` (Windows)](#scriptssetup-devtunnelps1-windows)
 - [package.json Scripts](#packagejson-scripts)
@@ -17,10 +17,11 @@
 - [Development Workflow](#development-workflow)
   - [Terminal 1: Start MCP Server](#terminal-1-start-mcp-server)
   - [Terminal 2: Start DevTunnel](#terminal-2-start-devtunnel)
-  - [After Starting the Tunnel](#after-starting-the-tunnel)
+  - [After First-Time Setup](#after-first-time-setup)
+- [Why Named Tunnels?](#why-named-tunnels)
 - [Troubleshooting](#troubleshooting)
 
-Automated setup for exposing localhost MCP servers via Azure DevTunnels using random tunnels.
+Automated setup for exposing localhost MCP servers via Azure DevTunnels using **named tunnels** for stable URLs.
 
 ## Prerequisites
 
@@ -36,17 +37,18 @@ Automated setup for exposing localhost MCP servers via Azure DevTunnels using ra
 Add these variables to `env/.env.local`:
 
 ```bash
-# DevTunnel port
+# DevTunnel configuration
 DEVTUNNEL_PORT=3001
+DEVTUNNEL_NAME=my-mcp-agent
 
 # Auto-populated by devtunnel setup script (run npm run tunnel):
 MCP_SERVER_URL=
 MCP_SERVER_DOMAIN=
 ```
 
-## Automated Setup Script (Random Tunnel)
+## Automated Setup Script (Named Tunnel)
 
-Uses random tunnels for simplicity - no need to manage named tunnels.
+Uses **named tunnels** so the URL stays the same across restarts. The script creates the tunnel on first run and reuses it on subsequent runs — no need to update `.env.local` or re-provision the agent after a tunnel restart.
 
 ### `scripts/setup-devtunnel.sh`
 
@@ -56,6 +58,7 @@ set -e
 
 ENV_FILE="env/.env.local"
 PORT="${DEVTUNNEL_PORT:-3001}"
+TUNNEL_NAME="${DEVTUNNEL_NAME:-mcp-agent}"
 
 # Auto-login check: ensure devtunnel is authenticated
 if ! devtunnel user show &>/dev/null; then
@@ -63,40 +66,62 @@ if ! devtunnel user show &>/dev/null; then
   devtunnel user login -g -d
 fi
 
-echo "Starting DevTunnel on port $PORT..."
+# Create named tunnel if it doesn't exist
+if ! devtunnel show "$TUNNEL_NAME" &>/dev/null; then
+  echo "Creating named tunnel '$TUNNEL_NAME'..."
+  devtunnel create -a "$TUNNEL_NAME"
+  devtunnel port create "$TUNNEL_NAME" -p "$PORT"
+  echo "Named tunnel '$TUNNEL_NAME' created on port $PORT."
+else
+  echo "Reusing existing tunnel '$TUNNEL_NAME'."
+fi
+
+echo "Starting DevTunnel '$TUNNEL_NAME'..."
 echo ""
 
-# Host a random tunnel and capture output
-devtunnel host -p "$PORT" --allow-anonymous 2>&1 | while IFS= read -r line; do
+# Host the named tunnel and capture output
+devtunnel host "$TUNNEL_NAME" 2>&1 | while IFS= read -r line; do
   echo "$line"
 
-  # Extract URL when it appears
+  # Extract URL when it appears (only updates .env.local on first run or URL change)
   if [[ "$line" =~ (https://[a-zA-Z0-9.-]+\.devtunnels\.ms[^ ]*) ]]; then
     TUNNEL_URL="${BASH_REMATCH[1]}"
     TUNNEL_DOMAIN=$(echo "$TUNNEL_URL" | sed -E 's|https?://||' | sed 's|/.*||')
 
-    echo ""
-    echo "Updating $ENV_FILE..."
-
-    # Update MCP_SERVER_URL
-    if grep -q "^MCP_SERVER_URL=" "$ENV_FILE"; then
-      sed -i "s|^MCP_SERVER_URL=.*|MCP_SERVER_URL=$TUNNEL_URL|" "$ENV_FILE"
+    # Check if .env.local already has the correct URL
+    CURRENT_URL=$(grep "^MCP_SERVER_URL=" "$ENV_FILE" 2>/dev/null | cut -d'=' -f2-)
+    if [ "$CURRENT_URL" = "$TUNNEL_URL" ]; then
+      echo ""
+      echo "Environment already configured (URL unchanged):"
+      echo "   MCP_SERVER_URL=$TUNNEL_URL"
+      echo "   MCP_SERVER_DOMAIN=$TUNNEL_DOMAIN"
+      echo ""
     else
-      echo "MCP_SERVER_URL=$TUNNEL_URL" >> "$ENV_FILE"
-    fi
+      echo ""
+      echo "Updating $ENV_FILE..."
 
-    # Update MCP_SERVER_DOMAIN
-    if grep -q "^MCP_SERVER_DOMAIN=" "$ENV_FILE"; then
-      sed -i "s|^MCP_SERVER_DOMAIN=.*|MCP_SERVER_DOMAIN=$TUNNEL_DOMAIN|" "$ENV_FILE"
-    else
-      echo "MCP_SERVER_DOMAIN=$TUNNEL_DOMAIN" >> "$ENV_FILE"
-    fi
+      # Update MCP_SERVER_URL
+      if grep -q "^MCP_SERVER_URL=" "$ENV_FILE"; then
+        sed -i "s|^MCP_SERVER_URL=.*|MCP_SERVER_URL=$TUNNEL_URL|" "$ENV_FILE"
+      else
+        echo "MCP_SERVER_URL=$TUNNEL_URL" >> "$ENV_FILE"
+      fi
 
-    echo ""
-    echo "Environment configured:"
-    echo "   MCP_SERVER_URL=$TUNNEL_URL"
-    echo "   MCP_SERVER_DOMAIN=$TUNNEL_DOMAIN"
-    echo ""
+      # Update MCP_SERVER_DOMAIN
+      if grep -q "^MCP_SERVER_DOMAIN=" "$ENV_FILE"; then
+        sed -i "s|^MCP_SERVER_DOMAIN=.*|MCP_SERVER_DOMAIN=$TUNNEL_DOMAIN|" "$ENV_FILE"
+      else
+        echo "MCP_SERVER_DOMAIN=$TUNNEL_DOMAIN" >> "$ENV_FILE"
+      fi
+
+      echo ""
+      echo "Environment configured:"
+      echo "   MCP_SERVER_URL=$TUNNEL_URL"
+      echo "   MCP_SERVER_DOMAIN=$TUNNEL_DOMAIN"
+      echo ""
+      echo "NOTE: First-time setup — run 'atk provision --env local' to deploy the agent."
+      echo ""
+    fi
   fi
 done
 ```
@@ -106,6 +131,7 @@ done
 ```powershell
 $envFile = "env\.env.local"
 $port = if ($env:DEVTUNNEL_PORT) { $env:DEVTUNNEL_PORT } else { "3001" }
+$tunnelName = if ($env:DEVTUNNEL_NAME) { $env:DEVTUNNEL_NAME } else { "mcp-agent" }
 
 # Auto-login check: ensure devtunnel is authenticated
 try {
@@ -115,11 +141,24 @@ try {
     devtunnel user login -g -d
 }
 
-Write-Host "Starting DevTunnel on port $port..."
+# Create named tunnel if it doesn't exist
+$tunnelExists = $false
+try {
+    devtunnel show $tunnelName 2>&1 | Out-Null
+    $tunnelExists = $true
+    Write-Host "Reusing existing tunnel '$tunnelName'."
+} catch {
+    Write-Host "Creating named tunnel '$tunnelName'..."
+    devtunnel create -a $tunnelName
+    devtunnel port create $tunnelName -p $port
+    Write-Host "Named tunnel '$tunnelName' created on port $port."
+}
+
+Write-Host "Starting DevTunnel '$tunnelName'..."
 Write-Host ""
 
-# Start devtunnel and process output
-devtunnel host -p $port --allow-anonymous 2>&1 | ForEach-Object {
+# Host the named tunnel and process output
+devtunnel host $tunnelName 2>&1 | ForEach-Object {
     Write-Host $_
 
     # Extract URL when it appears
@@ -127,19 +166,32 @@ devtunnel host -p $port --allow-anonymous 2>&1 | ForEach-Object {
         $tunnelUrl = $Matches[1]
         $tunnelDomain = $tunnelUrl -replace "https?://", "" -replace "/.*", ""
 
-        Write-Host ""
-        Write-Host "Updating $envFile..."
+        # Check if .env.local already has the correct URL
+        $content = Get-Content $envFile -ErrorAction SilentlyContinue
+        $currentUrl = ($content | Where-Object { $_ -match "^MCP_SERVER_URL=" }) -replace "^MCP_SERVER_URL=", ""
 
-        $content = Get-Content $envFile
-        $content = $content -replace "^MCP_SERVER_URL=.*", "MCP_SERVER_URL=$tunnelUrl"
-        $content = $content -replace "^MCP_SERVER_DOMAIN=.*", "MCP_SERVER_DOMAIN=$tunnelDomain"
-        $content | Out-File -FilePath $envFile -Encoding UTF8
+        if ($currentUrl -eq $tunnelUrl) {
+            Write-Host ""
+            Write-Host "Environment already configured (URL unchanged):"
+            Write-Host "   MCP_SERVER_URL=$tunnelUrl"
+            Write-Host "   MCP_SERVER_DOMAIN=$tunnelDomain"
+            Write-Host ""
+        } else {
+            Write-Host ""
+            Write-Host "Updating $envFile..."
 
-        Write-Host ""
-        Write-Host "Environment configured:"
-        Write-Host "   MCP_SERVER_URL=$tunnelUrl"
-        Write-Host "   MCP_SERVER_DOMAIN=$tunnelDomain"
-        Write-Host ""
+            $content = $content -replace "^MCP_SERVER_URL=.*", "MCP_SERVER_URL=$tunnelUrl"
+            $content = $content -replace "^MCP_SERVER_DOMAIN=.*", "MCP_SERVER_DOMAIN=$tunnelDomain"
+            $content | Out-File -FilePath $envFile -Encoding UTF8
+
+            Write-Host ""
+            Write-Host "Environment configured:"
+            Write-Host "   MCP_SERVER_URL=$tunnelUrl"
+            Write-Host "   MCP_SERVER_DOMAIN=$tunnelDomain"
+            Write-Host ""
+            Write-Host "NOTE: First-time setup - run 'atk provision --env local' to deploy the agent."
+            Write-Host ""
+        }
     }
 }
 ```
@@ -245,17 +297,38 @@ npm run tunnel:win
 ```
 
 The script will:
-1. Start a random devtunnel on the configured port
-2. Extract the tunnel URL from the output
-3. Update `env/.env.local` with `MCP_SERVER_URL` and `MCP_SERVER_DOMAIN`
+1. Create a named tunnel (first run only) or reuse the existing one
+2. Start hosting the tunnel on the configured port
+3. Update `env/.env.local` with `MCP_SERVER_URL` and `MCP_SERVER_DOMAIN` (first run only — URL is stable)
 4. Continue hosting the tunnel
 
-### After Starting the Tunnel
+### After First-Time Setup
 
-Since the URL changes each time, redeploy the agent after starting the tunnel:
+On the **first run**, deploy the agent once:
 
 ```bash
 npx -p @microsoft/m365agentstoolkit-cli@latest atk provision --env local
+```
+
+On **subsequent runs**, the tunnel URL is the same — just restart the tunnel and MCP server. No re-provisioning needed unless you change the agent manifest (mcpPlugin.json, declarativeAgent.json, etc.).
+
+## Why Named Tunnels?
+
+Random tunnels (`devtunnel host -p 3001`) generate a new URL every time. This creates a cascading update problem:
+
+1. New tunnel → new URL
+2. `.env.local` must be updated → MCP server must restart (new CSP headers)
+3. Agent manifest has old URL → must re-provision with `atk provision`
+
+With named tunnels, the URL is **stable across restarts**. Create once, reuse forever:
+
+```bash
+# One-time setup (handled by the script automatically):
+devtunnel create -a my-mcp-agent
+devtunnel port create my-mcp-agent -p 3001
+
+# Every time you develop (URL stays the same):
+devtunnel host my-mcp-agent
 ```
 
 ## Troubleshooting
@@ -263,11 +336,11 @@ npx -p @microsoft/m365agentstoolkit-cli@latest atk provision --env local
 | Issue | Solution |
 |-------|----------|
 | `devtunnel: command not found` | Install Azure DevTunnels CLI |
-| URL not extracted | Check the devtunnel output for the URL manually |
-| CSP errors in Copilot | Verify `MCP_SERVER_DOMAIN` matches tunnel domain |
-| Server not accessible | Ensure MCP server is running before starting tunnel |
+| CSP errors in Copilot | Verify `MCP_SERVER_DOMAIN` matches tunnel domain in `.env.local` |
+| Server not accessible through tunnel | Ensure MCP server is running before starting tunnel |
 | Permission denied on script | Run `chmod +x scripts/setup-devtunnel.sh` |
-| Agent not updated | Bump version in manifest.json and redeploy |
+| Agent not updated after manifest change | Bump version in manifest.json and redeploy with `atk provision` |
 | `EADDRINUSE` port conflict | Previous server instance still running. Windows: `taskkill //PID <pid> //F`. Linux/Mac: `lsof -ti:<port> \| xargs kill -9` |
 | DevTunnel login fails with CA policy error | Tenant Conditional Access blocks device code auth on managed devices. Use GitHub auth: `devtunnel user login -g -d` |
-| Tunnel URL changed but agent uses old URL | Tunnel URLs are ephemeral. After each tunnel restart: update `MCP_SERVER_URL` in `.env.local`, bump `version` in manifest.json, redeploy with `atk provision` |
+| Named tunnel already exists with wrong config | Delete and recreate: `devtunnel delete <name>` then re-run the setup script |
+| Tunnel process dies between sessions | Use `detach: true` when running via agent, or `Start-Process -WindowStyle Hidden` on Windows. The URL remains stable — just restart the tunnel |

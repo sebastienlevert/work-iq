@@ -14,6 +14,46 @@ description: |
 
 # Copilot MCP Server Development
 
+## 🔀 PATH SELECTION
+
+**Before proceeding, ask the user which path they want to take using AskUserQuestion.** Both are supported for M365 Copilot widget rendering. Present the tradeoffs and let them choose:
+
+| | **OAI Apps** (this skill) | **MCP Apps Extension** (`modelcontextprotocol/ext-apps`) |
+|---|---|---|
+| **Standard** | OpenAI-specific | Official MCP standard |
+| **Works in** | ChatGPT + M365 Copilot | M365 Copilot, ChatGPT, VSCode, and more |
+| **Maturity** | Battle-tested, production-ready | New official standard, growing ecosystem |
+| **Design** | OpenAI Apps SDK | MCP Apps protocol (cross-platform) |
+| **When to choose** | Existing OAI app investment | Prefer the open standard, want broadest client support |
+
+**Ask:** _"Would you like to build an OAI app (OpenAI Apps SDK — battle-tested, works in ChatGPT and M365 Copilot) or an MCP app (new official standard — works in M365 Copilot, ChatGPT, VSCode, and more)?"_
+
+- **OAI apps** → Continue below. This skill covers everything you need.
+- **MCP apps** → Install the `modelcontextprotocol/ext-apps` plugin (see below), then use the appropriate skill from that plugin.
+
+### MCP Apps: Install ext-apps Plugin
+
+If the user chooses MCP Apps, provide these instructions:
+
+```
+To build an MCP App, install the ext-apps plugin from the marketplace:
+
+1. /plugin marketplace add modelcontextprotocol/ext-apps
+2. /plugin install mcp-apps@modelcontextprotocol-ext-apps
+
+Then use one of these skills from that plugin:
+- create-mcp-app      — Scaffold a new MCP App with interactive UI from scratch
+- add-app-to-server   — Add interactive UI to an existing MCP server's tools
+- migrate-oai-app     — Convert an existing OAI app to use MCP Apps
+- convert-web-app     — Turn a web app into a hybrid web + MCP App
+
+After installing, invoke the relevant skill to continue.
+```
+
+> **Note:** The ext-apps plugin lives in the external `modelcontextprotocol/ext-apps` marketplace — it is not part of this plugin collection.
+
+---
+
 ## 📛 PROJECT DETECTION 📛
 
 This skill triggers when building MCP servers with OAI app or widget rendering for Microsoft 365 Copilot Chat. The MCP server can be written in any language that supports the MCP protocol (TypeScript, Python, C#, etc.). The agent project and MCP server may live in the same repo, separate folders, or entirely different projects.
@@ -22,7 +62,8 @@ This skill triggers when building MCP servers with OAI app or widget rendering f
 
 | Starting Point | What You Need | Path |
 |---------------|---------------|------|
-| **From scratch** (no agent, no MCP server) | Full setup | Delegate agent scaffolding to `m365-agent-developer` first, then return here for MCP server + widgets |
+| **Prefer MCP Apps standard** | Cross-platform widget support (M365 Copilot, ChatGPT, VSCode, and more) | Install `modelcontextprotocol/ext-apps`, then use `create-mcp-app` or `add-app-to-server` — see [Path Selection](#-path-selection) above |
+| **From scratch** (no agent, no MCP server) | Full OAI app setup | Delegate agent scaffolding to `m365-agent-developer` first, then return here for MCP server + widgets |
 | **Existing M365 agent, new MCP server** | MCP server + widgets + mcpPlugin.json | Start at [Implementation](#implementation) |
 | **Existing MCP server, add Copilot widgets** | Widget support added to existing server | Start at [Copilot Widget Protocol](references/copilot-widget-protocol.md#adaptation-checklist-existing-mcp-server) |
 | **Language choice** (non-TypeScript) | Protocol requirements | See [Copilot Widget Protocol](references/copilot-widget-protocol.md) for what to implement, [MCP Server Pattern (TypeScript)](references/mcp-server-pattern.md) as a reference |
@@ -31,7 +72,52 @@ This skill triggers when building MCP servers with OAI app or widget rendering f
 
 ## 🚨 CRITICAL EXECUTION RULES 🚨
 
-**BACKGROUND PROCESSES:** MCP server start commands (e.g., `npm run dev`, `python server.py`, `dotnet run`) and devtunnel hosting commands MUST ALWAYS be run in the background using `isBackground: true`. These are long-running processes that never terminate. Running them in foreground will block the agent.
+**BACKGROUND PROCESSES:** MCP server and devtunnel MUST be spawned as independent OS processes — NOT run inside the agent's shell session. `isBackground: true`, `mode: "async"`, and `Start-Job` all run inside the agent's shell session and will be killed between messages. The only reliable approach is to spawn a detached OS process.
+
+**Windows — use `Start-Process -WindowStyle Hidden`:**
+```powershell
+# Start devtunnel
+$t = Start-Process -FilePath "devtunnel" `
+    -ArgumentList "host","<tunnel-name>","-a" `
+    -WindowStyle Hidden -PassThru `
+    -RedirectStandardOutput "tunnel.log" -RedirectStandardError "tunnel-err.log"
+
+# Start MCP server — use cmd.exe /c to set the working directory and inherit PATH
+$s = Start-Process -FilePath "cmd.exe" `
+    -ArgumentList "/c","cd /d <abs-path-to-mcp-server> && <start-command>" `
+    -WindowStyle Hidden -PassThru `
+    -RedirectStandardOutput "server.log" -RedirectStandardError "server-err.log"
+
+# Save PIDs so they can be stopped later
+"$($t.Id),$($s.Id)" | Out-File pids.txt
+Write-Host "Started tunnel PID $($t.Id), server PID $($s.Id)"
+```
+To stop: `Stop-Process -Id (Get-Content pids.txt).Split(',')` or `Stop-Process -Id <pid>`.
+
+**Linux/Mac — use `nohup` with `&`:**
+```bash
+nohup devtunnel host <tunnel-name> > tunnel.log 2>tunnel-err.log &
+echo "tunnel:$!" >> pids.txt
+nohup <start-command> > server.log 2>server-err.log &
+echo "server:$!" >> pids.txt
+```
+To stop: `kill $(grep -oP '\d+' pids.txt)`.
+
+After starting, tail the logs to confirm both processes are up before proceeding:
+```powershell
+# Windows
+Start-Sleep 3; Get-Content tunnel.log, server.log
+```
+```bash
+# Linux/Mac
+sleep 3 && tail tunnel.log server.log
+```
+
+**FULL AUTOMATION:** Never tell the user to run commands manually. Install tools, authenticate, start services — do everything automatically. Only ask the user for interactive input that truly requires them (like device code confirmation during `devtunnel user login -g -d`). If a tool isn't installed, install it. If a service needs starting, start it. The user expects full automation.
+
+**PATH SELECTION (REQUIRED — STOP BEFORE ANY CODE):** You MUST use `AskUserQuestion` to ask the user whether they want OAI Apps or MCP Apps Extension before writing any code, running any commands, or making any architectural decisions.
+
+**There is no exception to this rule.** The most common failure mode is reasoning "the user's request makes it obvious, so asking is redundant." This reasoning is always wrong — invoke `AskUserQuestion` regardless. A user saying "build an MCP server with widgets" is NOT an answer to this question. A user invoking this skill by name is NOT an answer. Only an explicit answer to the question counts. See [PATH SELECTION](#-path-selection) above for the exact question to ask.
 
 **AGENT PROVISIONING:** Re-provisioning is only required when the **agent manifest** changes (e.g., mcpPlugin.json tool definitions, MCP server URL, declarativeAgent.json, instruction.txt). MCP server code changes (tool implementations, widget HTML, server logic) do **NOT** require re-provisioning the agent — running or deploying the server picks up changes automatically.
 
@@ -49,6 +135,27 @@ When provisioning is needed:
 - http://localhost:3001/widgets/another-widget.html
 ```
 List every `.html` file in the `mcp-server/widgets/` directory (or equivalent widget folder). This helps users verify widget rendering before testing in Copilot.
+
+**AUTO-DEPLOY ON COMPLETION (REQUIRED — DO NOT SKIP):** When coding is complete, proceed automatically without waiting for the user:
+1. Start MCP server + devtunnel in the background (per BACKGROUND PROCESSES above)
+2. Run E2E verification with MCP Inspector (per MCP TOOL CONFIGURATION RULE below) — fix any failures before continuing
+3. Provision the agent if needed (per AGENT PROVISIONING above)
+4. Print a project summary in this format:
+```
+## ✅ <Project Name> — Ready
+
+### Widgets
+- [widget-name.html](http://localhost:<PORT>/widgets/widget-name.html)
+- [widget-name2.html](http://localhost:<PORT>/widgets/widget-name2.html)
+
+### Endpoints
+- MCP server: http://localhost:<PORT>/mcp
+- MCP via tunnel: https://<tunnel-url>/mcp
+
+### Test in Copilot
+Local:      https://m365.cloud.microsoft/chat/?titleId={M365_TITLE_ID from env/.env.local}
+Other envs: {SHARE_LINK from env/.env.{environment}}
+```
 
 **AGENT PROJECT DELEGATION:** This skill builds MCP servers and widgets, NOT declarative agent projects. If the user's request involves creating or configuring the declarative agent itself (scaffolding, `m365agents.yml`, `m365agents.local.yml`, `declarativeAgent.json`, manifest lifecycle), delegate to the `m365-agent-developer` skill.
 
@@ -96,8 +203,13 @@ See [mcp-server-pattern.md](references/mcp-server-pattern.md) for the complete r
    ```
 3. **Copy the COMPLETE tool definition** from the inspector (including `name`, `description`, `inputSchema`, `_meta`, `annotations`, `title`)
 4. **Paste into `mcpPlugin.json`** under `runtimes[].spec.mcp_tool_description.tools` (inside the `RemoteMCPServer` runtime's `spec` object)
+5. **Run E2E verification** through the devtunnel — call each tool and confirm the response contains `structuredContent` and `_meta.openai/widgetAccessible: true`:
+   ```bash
+   npx @modelcontextprotocol/inspector --cli https://<tunnel-url>/mcp --transport http --method tools/call --tool-name <tool_name>
+   ```
+   Also verify `GET https://<tunnel-url>/health` returns `{"status":"ok"}`. Fix any failures before provisioning.
 
-The MCP Inspector shows the exact tool schema from your server. Copy it completely - do not manually write or modify these definitions. This ensures `mcpPlugin.json` stays in sync with the MCP server.
+The MCP Inspector shows the exact tool schema from your server. Copy it completely — do not manually write or modify these definitions. This ensures `mcpPlugin.json` stays in sync with the MCP server.
 
 ---
 
@@ -218,18 +330,12 @@ Core requirements:
 
 > **Local testing only.** DevTunnels are for development and testing on your machine. Before sharing the agent more broadly, deploy both the MCP server and widget assets to a hosted environment (e.g., Azure App Service, Azure Static Web Apps, or another hosting provider) and update the agent manifest URLs accordingly.
 
-See [references/devtunnels.md](references/devtunnels.md) for automated setup scripts.
+DevTunnels expose your localhost MCP server to M365 Copilot using **named tunnels** for stable URLs. See [references/devtunnels.md](references/devtunnels.md) for setup scripts, command reference, and troubleshooting.
 
-DevTunnels expose your localhost MCP server to M365 Copilot using **random tunnels** for simplicity:
-
-```bash
-devtunnel host -p 3001 --allow-anonymous
-```
-
-The setup script:
-1. Starts a random devtunnel on the configured port
-2. Extracts the tunnel URL from the output
-3. **Automatically updates `env/.env.local`** with `MCP_SERVER_URL` and `MCP_SERVER_DOMAIN`
+The setup script (`npm run tunnel` / `npm run tunnel:win`):
+1. Creates a named tunnel on first run (or reuses the existing one)
+2. Starts hosting the tunnel on the configured port
+3. Updates `env/.env.local` with `MCP_SERVER_URL` and `MCP_SERVER_DOMAIN` (first run only)
 4. Continues hosting the tunnel
 
 ### Quick Start
@@ -248,10 +354,7 @@ npm run tunnel
 npm run tunnel:win
 ```
 
-**After tunnel starts, redeploy the agent** (URL changes each time):
-```bash
-npx -p @microsoft/m365agentstoolkit-cli@latest atk provision --env local
-```
+On first run, provision the agent once the tunnel is up (see AGENT PROVISIONING rule). On subsequent runs the tunnel URL is stable — no re-provisioning needed unless the agent manifest changes.
 
 ## Development Workflow
 
@@ -260,17 +363,12 @@ npx -p @microsoft/m365agentstoolkit-cli@latest atk provision --env local
    - Python: `cd mcp-server && pip install -r requirements.txt && python server.py`
    - C#: `cd mcp-server && dotnet run`
 
-2. **Start the devtunnel** (auto-configures `.env.local`):
+2. **Start the devtunnel** (creates named tunnel on first run, reuses on subsequent runs):
    ```bash
    npm run tunnel
    ```
 
-3. **Deploy the agent** (required after each tunnel restart):
-   ```bash
-   npx -p @microsoft/m365agentstoolkit-cli@latest atk provision --env local
-   ```
-
-4. **Test in Copilot Chat** - Bump `version` in manifest.json if changes aren't reflected
+3. **Provision + test** — see AGENT PROVISIONING rule for when this is needed; bump `version` in manifest.json if Copilot doesn't reflect changes
 
 ## Best Practices
 

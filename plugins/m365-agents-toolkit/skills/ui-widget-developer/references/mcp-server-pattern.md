@@ -181,10 +181,7 @@ function createMCPServer(): Server {
       return {
         content: [{ type: "text", text: `Rendered ${args.items.length} items` }],
         structuredContent,
-        _meta: {
-          "openai/outputTemplate": WIDGET_URI,
-          invocation: "render_data",
-        },
+        _meta: toolMeta(WIDGET_URI),
       };
     }
 
