@@ -1,20 +1,16 @@
-# Microsoft Work IQ (Public Preview)
+# Microsoft Work IQ — Plugin Marketplace
 
-> Query your Microsoft 365 data with natural language — emails, meetings, documents, Teams messages, and more.
+> The official Microsoft Work IQ plugin collection for GitHub Copilot ✨
 
-[![npm version](https://img.shields.io/npm/v/@microsoft/workiq)](https://www.npmjs.com/package/@microsoft/workiq)
+Extend the power of GitHub Copilot with Work IQ plugins — MCP servers, skills, and tools that connect AI assistants to your Microsoft 365 data.
 
-The WorkIQ CLI and MCP (Model Context Protocol) server connects AI assistants to your Microsoft 365 Copilot data. Ask questions like *"What did my manager say about the project deadline?"* or *"Find my recent documents about Q4 planning."*
+> ⚠️ **Public Preview:** Features and APIs may change.
 
 To access Microsoft 365 tenant data, the WorkIQ CLI and MCP Server need to be consented to permissions that require administrative rights on the tenant. On first access, a consent dialog appears. If you are not an administrator, contact your tenant administrator to grant access.
 
 **For Tenant Administrators:** See the [Tenant Administrator Enablement Guide](./ADMIN-INSTRUCTIONS.md) for detailed instructions on granting admin consent, including a quick one-click consent URL.
 
 For more information, see Microsoft's [User and Admin Consent Overview](https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/user-admin-consent-overview).
-
-> ⚠️ **Public Preview:** Features and APIs may change.
-
----
 
 ## 📋 Prerequisites
 
@@ -35,17 +31,19 @@ npm --version
 
 ## 🚀 Quick Start with GitHub Copilot CLI
 
-The fastest way to get started is with GitHub Copilot CLI:
-
 ```bash
 # 1. Open GitHub Copilot CLI
 copilot
 
-# 2. Install WorkIQ
-/plugin install workiq@copilot-plugins
+# 2. Add this plugin marketplace (one-time setup)
+/plugin marketplace add microsoft/work-iq
+
+# 3. Install any plugin
+/plugin install workiq@work-iq
+/plugin install microsoft-365-agents-toolkit@work-iq
 ```
 
-**That's it!** Restart Copilot CLI and start querying your M365 data:
+**That's it!** Restart Copilot CLI and start using the plugin:
 
 ```
 You: What are my upcoming meetings this week?
@@ -55,7 +53,7 @@ You: Find documents I worked on yesterday
 
 ---
 
-## 📦 Alternative: Standalone Installation
+## 📦 Alternative: Standalone MCP Installation
 
 [![Install in VS Code](https://img.shields.io/badge/VS_Code-Install_Server-0098FF?style=flat-square&logo=visualstudiocode&logoColor=white)](https://vscode.dev/redirect/mcp/install?name=workiq&config=%7B%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22%40microsoft%2Fworkiq%22%2C%22mcp%22%5D%7D)
 [![Install in VS Code Insiders](https://img.shields.io/badge/VS_Code_Insiders-Install_Server-24bfa5?style=flat-square&logo=visualstudiocode&logoColor=white)](https://insiders.vscode.dev/redirect/mcp/install?name=workiq&config=%7B%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22%40microsoft%2Fworkiq%22%2C%22mcp%22%5D%7D&quality=insiders)
@@ -82,14 +80,8 @@ Or add it as an MCP server in your coding agent or IDE:
 {
   "workiq": {
     "command": "npx",
-    "args": [
-      "-y",
-      "@microsoft/workiq",
-      "mcp"
-    ],
-    "tools": [
-      "*"
-    ]
+    "args": ["-y", "@microsoft/workiq@latest", "mcp"],
+    "tools": ["*"]
   }
 }
 ```
@@ -156,35 +148,36 @@ workiq mcp
 
 ---
 
+## 🔌 Available Plugins
+
+| Plugin | Description |
+|--------|-------------|
+| [**workiq**](./plugins/workiq/) | Query Microsoft 365 data with natural language — emails, meetings, documents, Teams messages, and more. |
+| [**microsoft-365-agents-toolkit**](./plugins/microsoft-365-agents-toolkit/) | Toolkit for building M365 Copilot declarative agents — scaffolding, manifest authoring, and capability configuration. |
+
+---
+
 ## Platform Support
 
-The WorkIQ CLI and MCP Server are supported on `win_x64`, `win_arm64`, `linux_x64`, `linux_arm64`, `osx_x64` and `osx_arm64`. It is also supported in WSL as long as WSL is able to launch a browser to enable sign-in. 
+The WorkIQ CLI and MCP Server are supported on `win_x64`, `win_arm64`, `linux_x64`, `linux_arm64`, `osx_x64` and `osx_arm64`.
 
-One way to install browser support on WSL is with the following commands:
+---
 
-```bash
-sudo apt install xdg-utils
-sudo apt install wslu
-```
+## 🤝 Contributing
 
-## Contributing
+We welcome new plugins! See [CONTRIBUTING.md](./CONTRIBUTING.md) for the full guide. In short:
 
-The command-line tool and MCP server documented in this repository are **not open source**.  
-Their implementations are maintained internally, and source code contributions are not accepted.
+1. Create your plugin under `plugins/{your-plugin}/`
+2. Add `.mcp.json`, `README.md`, and `skills/{name}/SKILL.md`
+3. Register it in `.github/plugin/marketplace.json`
+4. Submit a pull request
 
-This repository is intentionally public to support **documentation, transparency, and feedback**.  
-We encourage the community to use this repo to:
-
-- Provide feedback on the documented behavior and APIs
-- Suggest features or product improvements
-- Share insights on developer experience or integration scenarios
-
-Please use GitHub Issues to engage. While the runtime implementation is proprietary, community input here directly informs the product’s direction.
+---
 
 ## 📄 License
 
-By using this package, you accept the license agreement. See [NOTICES.TXT](https://github.com/microsoft/work-iq-mcp) and EULA within the package for legal terms.
+By using this package, you accept the license agreement. See [NOTICES.TXT](./NOTICES.TXT) and EULA within the package for legal terms.
 
-## Trademarks 
+## Trademarks
 
 This project may contain trademarks or logos for projects, products, or services. Authorized use of Microsoft trademarks or logos is subject to and must follow [Microsoft’s Trademark & Brand Guidelines](https://www.microsoft.com/en-us/legal/intellectualproperty/trademarks/usage/general). Use of Microsoft trademarks or logos in modified versions of this project must not cause confusion or imply Microsoft sponsorship. Any use of third-party trademarks or logos is subject to those third-party's policies.
